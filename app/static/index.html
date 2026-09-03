@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kemjar TP Helper</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header>
+  <h1>Bantu Isi Tugas Pendahuluan (Kemjar)</h1>
+  <p class="warning">
+    Alat ini hanya membantu menyiapkan lembar jawaban, mencari kutipan, dan menyusun dokumen.
+    <strong>Jawaban tetap harus Anda tulis sendiri</strong> &mdash; soal melarang plagiarisme dan
+    penggunaan AI untuk menjawab. Usulan referensi/langkah dari AI wajib dicek kredibilitasnya
+    sebelum dipakai.
+  </p>
+</header>
+
+<main>
+  <section id="setup">
+    <h2>1. Identitas &amp; Berkas</h2>
+    <div class="grid">
+      <label>Nama Lengkap <input id="nama" type="text" /></label>
+      <label>NPM <input id="npm" type="text" /></label>
+      <label>Kode Aslab <input id="kode_aslab" type="text" /></label>
+      <label>No. Modul <input id="no_modul" type="text" placeholder="mis. 1" /></label>
+      <label>Tipe
+        <select id="tipe">
+          <option value="TP">TP - Tugas Pendahuluan</option>
+          <option value="CS">CS - Case Study</option>
+          <option value="TUTAM">TUTAM - Tugas Tambahan</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid">
+      <label>Soal (.docx) <input id="soal_file" type="file" accept=".docx" /></label>
+      <label>Template jawaban (.docx, opsional &mdash; default template resmi sudah tersedia)
+        <input id="template_file" type="file" accept=".docx" />
+      </label>
+    </div>
+    <button id="parse_btn">Baca Soal</button>
+    <p id="parse_status" class="status"></p>
+  </section>
+
+  <section id="preamble_section" hidden>
+    <h2>Ketentuan Tugas Pendahuluan</h2>
+    <ul id="preamble_list"></ul>
+  </section>
+
+  <section id="part1_section" hidden>
+    <h2>2. Part 1 &mdash; Teori</h2>
+    <div id="part1_items"></div>
+  </section>
+
+  <section id="part2_section" hidden>
+    <h2>3. Part 2 &mdash; Praktek</h2>
+    <div id="part2_items"></div>
+  </section>
+
+  <section id="generate_section" hidden>
+    <h2>4. Buat Dokumen</h2>
+    <button id="generate_btn">Generate .docx</button>
+    <p id="generate_status" class="status"></p>
+  </section>
+</main>
+
+<template id="question-item-template">
+  <div class="item">
+    <h3></h3>
+    <p class="question-text"></p>
+    <p class="classify-status status"></p>
+    <div class="injection-warning" hidden></div>
+    <div class="steps-block" hidden>
+      <button class="steps_btn">Cari Langkah (AI)</button>
+      <p class="ai-disclaimer">Usulan dari pengetahuan AI, bukan hasil pencarian web live &mdash; verifikasi &amp; tulis ulang dengan kata Anda sendiri.</p>
+      <textarea class="steps-area" rows="4" placeholder="Langkah-langkah akan muncul di sini setelah klik 'Cari Langkah'."></textarea>
+    </div>
+    <div class="quotes-block" hidden>
+      <button class="quotes_btn">Cari Kutipan (AI)</button>
+      <p class="ai-disclaimer">Usulan dari pengetahuan AI (bukan hasil pencarian web live) &mdash; belum berupa jawaban.</p>
+      <p class="quote-warning" hidden>&#9888;&#65039; AI TIDAK mengakses internet untuk ini &mdash; cuplikan &amp; sumber di bawah BISA SALAH/tidak persis, WAJIB dicek manual ke sumber aslinya lalu ditulis ulang pakai kalimat Anda sendiri di kotak jawaban sebelum submit &mdash; bukan jawaban akhir.</p>
+    </div>
+    <label>Jawaban Anda
+      <textarea class="answer-area" rows="5"></textarea>
+    </label>
+    <div class="screenshot-block" hidden>
+      <label>Screenshot (bisa lebih dari satu)
+        <input type="file" class="screenshot-input" accept="image/*" multiple />
+      </label>
+    </div>
+    <div class="sources-block" hidden>
+      <p class="ai-disclaimer">Referensi &mdash; centang sumber yang benar-benar dipakai di jawaban akhir Anda (format IEEE):</p>
+      <ul class="sources-list"></ul>
+    </div>
+  </div>
+</template>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
