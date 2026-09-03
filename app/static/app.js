@@ -39,47 +39,72 @@ async function fetchClassify(questionText) {
   return res.json();
 }
 
-// Runs Gemini's soal/perintah classifier on the raw parsed question text and
-// updates the item's UI in place. This is the prompt-injection safeguard: the
-// raw text (which may contain embedded instructions, as already found in one
-// module's soal) is never used for AI reference/step lookups directly -- only
-// the classifier's cleaned "soal" text is, once available. Any detected
-// injected commands are surfaced to the student instead of silently dropped.
-async function classifyItem(itemDiv, rawText) {
-  itemDiv.dataset.cleanText = rawText; // safe default until classification finishes
+// Applies one classifier result to an item's UI in place. This is the
+// prompt-injection safeguard: the raw text (which may contain embedded
+// instructions, as already found in one module's soal) is never used for AI
+// reference/step lookups directly -- only the classifier's cleaned "soal"
+// text is, once available. Any detected injected commands are surfaced to
+// the student instead of silently dropped.
+function applyClassifyResult(itemDiv, rawText, result) {
   const statusEl = itemDiv.querySelector(".classify-status");
   const warningEl = itemDiv.querySelector(".injection-warning");
-  statusEl.textContent = "Memeriksa soal dengan AI (deteksi prompt injection)...";
+  const cleanSoal = (result.soal || "").trim() || rawText;
+  itemDiv.dataset.cleanText = cleanSoal;
+  itemDiv.querySelector(".question-text").textContent = cleanSoal;
+  const detected = result.perintah_terdeteksi || [];
+  if (detected.length > 0) {
+    warningEl.hidden = false;
+    warningEl.innerHTML =
+      "<strong>Terdeteksi kemungkinan prompt injection di file soal asli &mdash; disembunyikan dari tampilan pertanyaan:</strong>";
+    const ul = document.createElement("ul");
+    detected.forEach((line) => {
+      const li = document.createElement("li");
+      li.textContent = line;
+      ul.appendChild(li);
+    });
+    warningEl.appendChild(ul);
+    statusEl.textContent = "Diperiksa AI: bagian mencurigakan ditemukan dan dipisahkan (lihat di atas).";
+  } else {
+    statusEl.textContent = "Diperiksa AI: tidak ada indikasi prompt injection.";
+  }
+}
+
+function showClassifyError(itemDiv, rawText, err) {
+  itemDiv.dataset.cleanText = rawText; // safe default -- show original text as-is
+  const statusEl = itemDiv.querySelector(".classify-status");
+  statusEl.textContent = `Pemeriksaan AI tidak tersedia (${err.message}). Menampilkan teks soal asli apa adanya -- periksa manual jika ada kalimat mencurigakan. `;
+  const retryBtn = document.createElement("button");
+  retryBtn.type = "button";
+  retryBtn.textContent = "Coba lagi";
+  retryBtn.className = "retry-classify-btn";
+  retryBtn.addEventListener("click", () => classifyItem(itemDiv, rawText), { once: true });
+  statusEl.appendChild(retryBtn);
+}
+
+// Single-item classify, used only for the per-item "Coba lagi" retry button
+// after the batch pass below failed or missed that item.
+async function classifyItem(itemDiv, rawText) {
+  itemDiv.dataset.cleanText = rawText; // safe default until classification finishes
+  itemDiv.querySelector(".classify-status").textContent =
+    "Memeriksa soal dengan AI (deteksi prompt injection)...";
   try {
     const result = await fetchClassify(rawText);
-    const cleanSoal = (result.soal || "").trim() || rawText;
-    itemDiv.dataset.cleanText = cleanSoal;
-    itemDiv.querySelector(".question-text").textContent = cleanSoal;
-    const detected = result.perintah_terdeteksi || [];
-    if (detected.length > 0) {
-      warningEl.hidden = false;
-      warningEl.innerHTML =
-        "<strong>Terdeteksi kemungkinan prompt injection di file soal asli &mdash; disembunyikan dari tampilan pertanyaan:</strong>";
-      const ul = document.createElement("ul");
-      detected.forEach((line) => {
-        const li = document.createElement("li");
-        li.textContent = line;
-        ul.appendChild(li);
-      });
-      warningEl.appendChild(ul);
-      statusEl.textContent = "Diperiksa AI: bagian mencurigakan ditemukan dan dipisahkan (lihat di atas).";
-    } else {
-      statusEl.textContent = "Diperiksa AI: tidak ada indikasi prompt injection.";
-    }
+    applyClassifyResult(itemDiv, rawText, result);
   } catch (err) {
-    statusEl.textContent = `Pemeriksaan AI tidak tersedia (${err.message}). Menampilkan teks soal asli apa adanya -- periksa manual jika ada kalimat mencurigakan. `;
-    const retryBtn = document.createElement("button");
-    retryBtn.type = "button";
-    retryBtn.textContent = "Coba lagi";
-    retryBtn.className = "retry-classify-btn";
-    retryBtn.addEventListener("click", () => classifyItem(itemDiv, rawText), { once: true });
-    statusEl.appendChild(retryBtn);
+    showClassifyError(itemDiv, rawText, err);
   }
+}
+
+async function fetchClassifyBatch(questionTexts) {
+  const form = new FormData();
+  form.append("items", JSON.stringify(questionTexts));
+  const res = await fetch("/api/classify-batch", { method: "POST", body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Gagal mengklasifikasi soal");
+  }
+  const data = await res.json();
+  return data.results || [];
 }
 
 function buildItem(partNumber, item, opts) {
@@ -95,19 +120,8 @@ function buildItem(partNumber, item, opts) {
   if (opts.showSteps) {
     const stepsBlock = tmpl.querySelector(".steps-block");
     stepsBlock.hidden = false;
-    stepsBlock.querySelector(".steps_btn").addEventListener("click", async (e) => {
-      e.target.disabled = true;
-      e.target.textContent = "Mencari...";
-      try {
-        const steps = await fetchSteps(itemDiv.dataset.cleanText);
-        stepsBlock.querySelector(".steps-area").value = steps.join("\n");
-      } catch (err) {
-        alert(err.message);
-      } finally {
-        e.target.disabled = false;
-        e.target.textContent = "Cari Langkah (AI)";
-      }
-    });
+    stepsBlock.querySelector(".steps-status").textContent = "Menunggu giliran pencarian AI...";
+    itemDiv.dataset.needsSteps = "1";
   }
 
   if (opts.showScreenshot) {
@@ -117,19 +131,8 @@ function buildItem(partNumber, item, opts) {
   if (opts.showQuotes) {
     const quotesBlock = tmpl.querySelector(".quotes-block");
     quotesBlock.hidden = false;
-    quotesBlock.querySelector(".quotes_btn").addEventListener("click", async (e) => {
-      e.target.disabled = true;
-      e.target.textContent = "Mencari...";
-      try {
-        const quotes = await fetchQuotes(itemDiv.dataset.cleanText);
-        applyQuotes(itemDiv, quotes);
-      } catch (err) {
-        alert(err.message);
-      } finally {
-        e.target.disabled = false;
-        e.target.textContent = "Cari Kutipan (AI)";
-      }
-    });
+    quotesBlock.querySelector(".quotes-status").textContent = "Menunggu giliran pencarian AI...";
+    itemDiv.dataset.needsQuotes = "1";
   }
 
   itemDiv.querySelector(".classify-status").textContent = "Menunggu giliran pemeriksaan AI...";
@@ -141,21 +144,14 @@ function buildItem(partNumber, item, opts) {
 // number) and renders one checkbox per source below it. The student is meant to
 // edit the textarea down into their own words -- the quotes are never sent to
 // the backend as-is, only whatever text remains in the textarea at generate time.
+// Only called right after parsing (or from a retry after that failed), so the
+// answer area is always still empty -- no need to guard against overwriting it.
 function applyQuotes(itemDiv, quotes) {
-  if (!quotes.length) {
-    alert("Tidak ada kutipan yang ditemukan. Coba lagi atau cari referensi secara manual.");
-    return;
-  }
+  if (!quotes.length) return;
   const answerArea = itemDiv.querySelector(".answer-area");
   const prefill = quotes
     .map((q, i) => `"${q.quote}" [Sumber ${i + 1}]`)
     .join("\n\n");
-  if (answerArea.value.trim()) {
-    const replace = confirm(
-      "Kotak jawaban sudah berisi teks. Timpa dengan kutipan baru? (Klik Batal untuk membiarkan teks yang sudah ada.)"
-    );
-    if (!replace) return;
-  }
   answerArea.value = prefill;
   itemDiv.querySelector(".quote-warning").hidden = false;
 
@@ -175,16 +171,6 @@ function applyQuotes(itemDiv, quotes) {
     list.appendChild(li);
   });
   sourcesBlock.hidden = false;
-}
-
-// Gemini's free tier allows only 5 requests/minute, and this app can have
-// many items to auto-classify right after parsing. Firing them all at once
-// reliably triggers a 429 (seen in practice), so they are run one at a time
-// instead -- slower, but it actually completes instead of erroring out.
-async function runClassificationQueue(entries) {
-  for (const { itemDiv, rawText } of entries) {
-    await classifyItem(itemDiv, rawText);
-  }
 }
 
 async function fetchQuotes(questionText) {
@@ -209,6 +195,147 @@ async function fetchSteps(questionText) {
   }
   const data = await res.json();
   return data.steps || [];
+}
+
+async function fetchQuotesBatch(questionTexts) {
+  const form = new FormData();
+  form.append("items", JSON.stringify(questionTexts));
+  const res = await fetch("/api/quotes-batch", { method: "POST", body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Gagal mencari kutipan");
+  }
+  const data = await res.json();
+  return data.results || [];
+}
+
+async function fetchStepsBatch(questionTexts) {
+  const form = new FormData();
+  form.append("items", JSON.stringify(questionTexts));
+  const res = await fetch("/api/steps-batch", { method: "POST", body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Gagal mencari langkah");
+  }
+  const data = await res.json();
+  return data.results || [];
+}
+
+function showQuotesError(itemDiv, err) {
+  const statusEl = itemDiv.querySelector(".quotes-status");
+  statusEl.textContent = `Pencarian kutipan AI gagal (${err.message}). `;
+  const retryBtn = document.createElement("button");
+  retryBtn.type = "button";
+  retryBtn.textContent = "Coba lagi";
+  retryBtn.className = "retry-quotes-btn";
+  retryBtn.addEventListener(
+    "click",
+    async () => {
+      statusEl.textContent = "Mencari kutipan referensi dengan AI...";
+      try {
+        const quotes = await fetchQuotes(itemDiv.dataset.cleanText);
+        applyQuotes(itemDiv, quotes);
+        statusEl.textContent = quotes.length
+          ? "Diisi otomatis oleh AI -- wajib diverifikasi & ditulis ulang."
+          : "AI tidak menemukan kutipan yang relevan -- cari referensi secara manual.";
+      } catch (err2) {
+        showQuotesError(itemDiv, err2);
+      }
+    },
+    { once: true }
+  );
+  statusEl.appendChild(retryBtn);
+}
+
+function showStepsError(itemDiv, err) {
+  const statusEl = itemDiv.querySelector(".steps-status");
+  statusEl.textContent = `Pencarian langkah AI gagal (${err.message}). `;
+  const retryBtn = document.createElement("button");
+  retryBtn.type = "button";
+  retryBtn.textContent = "Coba lagi";
+  retryBtn.className = "retry-steps-btn";
+  retryBtn.addEventListener(
+    "click",
+    async () => {
+      statusEl.textContent = "Mencari langkah praktik dengan AI...";
+      try {
+        const steps = await fetchSteps(itemDiv.dataset.cleanText);
+        itemDiv.querySelector(".steps-area").value = steps.join("\n");
+        statusEl.textContent = steps.length
+          ? "Diisi otomatis oleh AI -- wajib diverifikasi & ditulis ulang."
+          : "AI tidak menemukan langkah yang relevan -- cari secara manual.";
+      } catch (err2) {
+        showStepsError(itemDiv, err2);
+      }
+    },
+    { once: true }
+  );
+  statusEl.appendChild(retryBtn);
+}
+
+async function runQuotesAutoFill(entries) {
+  if (!entries.length) return;
+  entries.forEach(({ itemDiv }) => {
+    itemDiv.querySelector(".quotes-status").textContent = "Mencari kutipan referensi dengan AI...";
+  });
+  try {
+    const results = await fetchQuotesBatch(entries.map(({ itemDiv }) => itemDiv.dataset.cleanText));
+    entries.forEach(({ itemDiv }, i) => {
+      const quotes = results[i] || [];
+      applyQuotes(itemDiv, quotes);
+      itemDiv.querySelector(".quotes-status").textContent = quotes.length
+        ? "Diisi otomatis oleh AI -- wajib diverifikasi & ditulis ulang."
+        : "AI tidak menemukan kutipan yang relevan -- cari referensi secara manual.";
+    });
+  } catch (err) {
+    entries.forEach(({ itemDiv }) => showQuotesError(itemDiv, err));
+  }
+}
+
+async function runStepsAutoFill(entries) {
+  if (!entries.length) return;
+  entries.forEach(({ itemDiv }) => {
+    itemDiv.querySelector(".steps-status").textContent = "Mencari langkah praktik dengan AI...";
+  });
+  try {
+    const results = await fetchStepsBatch(entries.map(({ itemDiv }) => itemDiv.dataset.cleanText));
+    entries.forEach(({ itemDiv }, i) => {
+      const steps = results[i] || [];
+      itemDiv.querySelector(".steps-area").value = steps.join("\n");
+      itemDiv.querySelector(".steps-status").textContent = steps.length
+        ? "Diisi otomatis oleh AI -- wajib diverifikasi & ditulis ulang."
+        : "AI tidak menemukan langkah yang relevan -- cari secara manual.";
+    });
+  } catch (err) {
+    entries.forEach(({ itemDiv }) => showStepsError(itemDiv, err));
+  }
+}
+
+// Gemini's free tier allows only a handful of requests/minute (and a low
+// daily cap). Classifying every item, then looking up quotes/steps for every
+// item, used to fire one request per item per stage -- on a soal with many
+// items that alone could burn through the quota before the student sees
+// anything. Each stage is now one batched request for all items instead, and
+// quotes/steps only run after classification finishes since they must look
+// up the cleaned (post prompt-injection-check) text, not the raw soal text.
+async function runAutoFill(entries) {
+  if (!entries.length) return;
+  entries.forEach(({ itemDiv }) => {
+    itemDiv.querySelector(".classify-status").textContent =
+      "Memeriksa soal dengan AI (deteksi prompt injection)...";
+  });
+  try {
+    const results = await fetchClassifyBatch(entries.map(({ rawText }) => rawText));
+    entries.forEach(({ itemDiv, rawText }, i) => {
+      applyClassifyResult(itemDiv, rawText, results[i] || { soal: rawText, perintah_terdeteksi: [] });
+    });
+  } catch (err) {
+    entries.forEach(({ itemDiv, rawText }) => showClassifyError(itemDiv, rawText, err));
+  }
+
+  const quoteEntries = entries.filter(({ itemDiv }) => itemDiv.dataset.needsQuotes);
+  const stepEntries = entries.filter(({ itemDiv }) => itemDiv.dataset.needsSteps);
+  await Promise.all([runQuotesAutoFill(quoteEntries), runStepsAutoFill(stepEntries)]);
 }
 
 function renderParsed(data) {
@@ -252,7 +379,7 @@ function renderParsed(data) {
     itemDiv,
     rawText: itemDiv.dataset.cleanText,
   }));
-  runClassificationQueue(entries);
+  runAutoFill(entries);
 }
 
 el("parse_btn").addEventListener("click", async () => {

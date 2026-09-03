@@ -9,15 +9,29 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from docx_builder import build_output
 from gemini_client import (
     GeminiError,
     classify_soal_or_perintah,
+    classify_soal_or_perintah_batch,
     suggest_quotes,
+    suggest_quotes_batch,
     suggest_steps,
+    suggest_steps_batch,
 )
 from parser import parse_soal
+
+
+def _parse_items_form(items: str) -> list[str]:
+    try:
+        item_texts = json.loads(items)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Data items tidak valid: {exc}") from exc
+    if not isinstance(item_texts, list) or not all(isinstance(x, str) for x in item_texts):
+        raise HTTPException(status_code=400, detail="items harus berupa array string")
+    return item_texts
 
 APP_DIR = Path(__file__).resolve().parent
 load_dotenv(APP_DIR / ".env")
@@ -54,7 +68,41 @@ async def classify_endpoint(question_text: str = Form(...)) -> dict:
     """Have Gemini separate legitimate question text from any embedded
     instruction/command aimed at an AI or reader (prompt-injection defense)."""
     try:
-        return classify_soal_or_perintah(question_text)
+        return await run_in_threadpool(classify_soal_or_perintah, question_text)
+    except GeminiError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
+
+
+@app.post("/api/classify-batch")
+async def classify_batch_endpoint(items: str = Form(...)) -> dict:
+    """Same as /api/classify but for the whole soal's items in one Gemini call,
+    used for the auto-classify pass that runs right after parsing so it
+    doesn't fire one request per item."""
+    item_texts = _parse_items_form(items)
+    try:
+        return {"results": await run_in_threadpool(classify_soal_or_perintah_batch, item_texts)}
+    except GeminiError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
+
+
+@app.post("/api/quotes-batch")
+async def quotes_batch_endpoint(items: str = Form(...)) -> dict:
+    """Same as /api/quotes but for every Part 1 item in one Gemini call, used
+    for the auto-fill pass that runs right after parsing/classifying."""
+    item_texts = _parse_items_form(items)
+    try:
+        return {"results": await run_in_threadpool(suggest_quotes_batch, item_texts)}
+    except GeminiError as exc:
+        raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
+
+
+@app.post("/api/steps-batch")
+async def steps_batch_endpoint(items: str = Form(...)) -> dict:
+    """Same as /api/steps but for every Part 2 item in one Gemini call, used
+    for the auto-fill pass that runs right after parsing/classifying."""
+    item_texts = _parse_items_form(items)
+    try:
+        return {"results": await run_in_threadpool(suggest_steps_batch, item_texts)}
     except GeminiError as exc:
         raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
 
@@ -62,7 +110,7 @@ async def classify_endpoint(question_text: str = Form(...)) -> dict:
 @app.post("/api/quotes")
 async def quotes_endpoint(question_text: str = Form(...)) -> dict:
     try:
-        return {"quotes": suggest_quotes(question_text)}
+        return {"quotes": await run_in_threadpool(suggest_quotes, question_text)}
     except GeminiError as exc:
         raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
 
@@ -70,7 +118,7 @@ async def quotes_endpoint(question_text: str = Form(...)) -> dict:
 @app.post("/api/steps")
 async def steps_endpoint(question_text: str = Form(...)) -> dict:
     try:
-        return {"steps": suggest_steps(question_text)}
+        return {"steps": await run_in_threadpool(suggest_steps, question_text)}
     except GeminiError as exc:
         raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
 

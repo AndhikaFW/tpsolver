@@ -80,24 +80,19 @@ button:hover:not(:disabled) { background: #234a9e; }
   color: #7a1f1f;
 }
 .injection-warning strong { display: block; margin-bottom: 0.25rem; }
-.classify-status { font-size: 0.8rem; color: #666; }
-.retry-classify-btn {
+.classify-status, .quotes-status, .steps-status { font-size: 0.8rem; color: #666; }
+.retry-classify-btn, .retry-quotes-btn, .retry-steps-btn {
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   margin-left: 0.4rem;
   background: #888;
 }
-.retry-classify-btn:hover { background: #666; }
+.retry-classify-btn:hover, .retry-quotes-btn:hover, .retry-steps-btn:hover { background: #666; }
 .ai-disclaimer {
   font-size: 0.8rem;
   color: #8a6d00;
   margin: 0.25rem 0;
 }
-.quotes_btn, .steps_btn {
-  background: #4a7d3d;
-  margin-bottom: 0.25rem;
-}
-.quotes_btn:hover:not(:disabled), .steps_btn:hover:not(:disabled) { background: #3a6230; }
 .steps-block, .quotes-block, .screenshot-block, .sources-block { margin-top: 0.75rem; }
 .quote-warning {
   background: #fdecea;
