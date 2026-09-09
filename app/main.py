@@ -137,7 +137,7 @@ async def generate_endpoint(
     nama = identity_data.get("nama", "")
     npm = identity_data.get("npm", "")
     no_modul = identity_data.get("no_modul", "")
-    filename = f"{tipe}_{kode_aslab}_{nama}_{npm}_Kemjar{no_modul}.docx"
+    filename = f"{tipe}_{kode_aslab}_{nama.replace(" ", "")}_{npm}_Kemjar{no_modul}.docx"
 
     return Response(
         content=docx_bytes,

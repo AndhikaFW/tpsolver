@@ -198,6 +198,7 @@ def build_output(
                     _add_styled_paragraph(doc, answer_tmpl, line, strip_numPr=True)
 
             for image_bytes in images_by_item.get(f"{part_number}-{number}", []):
+                _add_styled_paragraph(doc, ref_label_tmpl, "Screenshot:")
                 _add_image(doc, image_bytes)
 
             references = item.get("references") or []
