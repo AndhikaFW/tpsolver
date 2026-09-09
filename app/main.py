@@ -15,11 +15,9 @@ from docx_builder import build_output
 from gemini_client import (
     GeminiError,
     classify_soal_or_perintah,
-    classify_soal_or_perintah_batch,
+    process_soal_batch,
     suggest_quotes,
-    suggest_quotes_batch,
     suggest_steps,
-    suggest_steps_batch,
 )
 from parser import parse_soal
 
@@ -73,36 +71,18 @@ async def classify_endpoint(question_text: str = Form(...)) -> dict:
         raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
 
 
-@app.post("/api/classify-batch")
-async def classify_batch_endpoint(items: str = Form(...)) -> dict:
-    """Same as /api/classify but for the whole soal's items in one Gemini call,
-    used for the auto-classify pass that runs right after parsing so it
-    doesn't fire one request per item."""
-    item_texts = _parse_items_form(items)
+@app.post("/api/process-batch")
+async def process_batch_endpoint(
+    part1_items: str = Form(...), part2_items: str = Form(...)
+) -> dict:
+    """Auto-fill pass that runs right after parsing: classifies every item
+    (prompt-injection defense) AND fetches Part 1 reference suggestions /
+    Part 2 practical steps, all in a single Gemini call instead of the 3
+    separate batched requests this used to be."""
+    part1_texts = _parse_items_form(part1_items)
+    part2_texts = _parse_items_form(part2_items)
     try:
-        return {"results": await run_in_threadpool(classify_soal_or_perintah_batch, item_texts)}
-    except GeminiError as exc:
-        raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
-
-
-@app.post("/api/quotes-batch")
-async def quotes_batch_endpoint(items: str = Form(...)) -> dict:
-    """Same as /api/quotes but for every Part 1 item in one Gemini call, used
-    for the auto-fill pass that runs right after parsing/classifying."""
-    item_texts = _parse_items_form(items)
-    try:
-        return {"results": await run_in_threadpool(suggest_quotes_batch, item_texts)}
-    except GeminiError as exc:
-        raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
-
-
-@app.post("/api/steps-batch")
-async def steps_batch_endpoint(items: str = Form(...)) -> dict:
-    """Same as /api/steps but for every Part 2 item in one Gemini call, used
-    for the auto-fill pass that runs right after parsing/classifying."""
-    item_texts = _parse_items_form(items)
-    try:
-        return {"results": await run_in_threadpool(suggest_steps_batch, item_texts)}
+        return await run_in_threadpool(process_soal_batch, part1_texts, part2_texts)
     except GeminiError as exc:
         raise HTTPException(status_code=exc.http_status, detail=str(exc)) from exc
 

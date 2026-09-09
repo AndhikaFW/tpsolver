@@ -95,18 +95,6 @@ async function classifyItem(itemDiv, rawText) {
   }
 }
 
-async function fetchClassifyBatch(questionTexts) {
-  const form = new FormData();
-  form.append("items", JSON.stringify(questionTexts));
-  const res = await fetch("/api/classify-batch", { method: "POST", body: form });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || "Gagal mengklasifikasi soal");
-  }
-  const data = await res.json();
-  return data.results || [];
-}
-
 function buildItem(partNumber, item, opts) {
   const tmpl = el("question-item-template").content.cloneNode(true);
   const itemDiv = tmpl.querySelector(".item");
@@ -197,28 +185,16 @@ async function fetchSteps(questionText) {
   return data.steps || [];
 }
 
-async function fetchQuotesBatch(questionTexts) {
+async function fetchProcessBatch(part1Texts, part2Texts) {
   const form = new FormData();
-  form.append("items", JSON.stringify(questionTexts));
-  const res = await fetch("/api/quotes-batch", { method: "POST", body: form });
+  form.append("part1_items", JSON.stringify(part1Texts));
+  form.append("part2_items", JSON.stringify(part2Texts));
+  const res = await fetch("/api/process-batch", { method: "POST", body: form });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || "Gagal mencari kutipan");
+    throw new Error(err.detail || "Gagal memproses soal dengan AI");
   }
-  const data = await res.json();
-  return data.results || [];
-}
-
-async function fetchStepsBatch(questionTexts) {
-  const form = new FormData();
-  form.append("items", JSON.stringify(questionTexts));
-  const res = await fetch("/api/steps-batch", { method: "POST", body: form });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || "Gagal mencari langkah");
-  }
-  const data = await res.json();
-  return data.results || [];
+  return res.json(); // { part1: [...], part2: [...] }
 }
 
 function showQuotesError(itemDiv, err) {
@@ -273,69 +249,58 @@ function showStepsError(itemDiv, err) {
   statusEl.appendChild(retryBtn);
 }
 
-async function runQuotesAutoFill(entries) {
+// Gemini's free tier allows only a handful of requests/minute (and a low
+// daily cap). Classifying every item, then looking up quotes/steps, used to
+// fire one request per item, then one more batched request per stage (3
+// requests total: classify, Part 1 quotes, Part 2 steps) -- on a soal with
+// many items that alone could burn through the quota before the student
+// sees anything. All of it now happens in a single combined request instead.
+async function runAutoFill(entries) {
   if (!entries.length) return;
+  const part1Entries = entries.filter(({ itemDiv }) => itemDiv.dataset.part === "1");
+  const part2Entries = entries.filter(({ itemDiv }) => itemDiv.dataset.part === "2");
+
   entries.forEach(({ itemDiv }) => {
-    itemDiv.querySelector(".quotes-status").textContent = "Mencari kutipan referensi dengan AI...";
+    itemDiv.querySelector(".classify-status").textContent =
+      "Memeriksa soal dengan AI (deteksi prompt injection)...";
+    if (itemDiv.dataset.needsQuotes) {
+      itemDiv.querySelector(".quotes-status").textContent = "Mencari kutipan referensi dengan AI...";
+    }
+    if (itemDiv.dataset.needsSteps) {
+      itemDiv.querySelector(".steps-status").textContent = "Mencari langkah praktik dengan AI...";
+    }
   });
+
   try {
-    const results = await fetchQuotesBatch(entries.map(({ itemDiv }) => itemDiv.dataset.cleanText));
-    entries.forEach(({ itemDiv }, i) => {
-      const quotes = results[i] || [];
+    const results = await fetchProcessBatch(
+      part1Entries.map(({ rawText }) => rawText),
+      part2Entries.map(({ rawText }) => rawText)
+    );
+    part1Entries.forEach(({ itemDiv, rawText }, i) => {
+      const r = (results.part1 || [])[i] || { soal: rawText, perintah_terdeteksi: [], quotes: [] };
+      applyClassifyResult(itemDiv, rawText, r);
+      const quotes = r.quotes || [];
       applyQuotes(itemDiv, quotes);
       itemDiv.querySelector(".quotes-status").textContent = quotes.length
         ? "Diisi otomatis oleh AI -- wajib diverifikasi & ditulis ulang."
         : "AI tidak menemukan kutipan yang relevan -- cari referensi secara manual.";
     });
-  } catch (err) {
-    entries.forEach(({ itemDiv }) => showQuotesError(itemDiv, err));
-  }
-}
-
-async function runStepsAutoFill(entries) {
-  if (!entries.length) return;
-  entries.forEach(({ itemDiv }) => {
-    itemDiv.querySelector(".steps-status").textContent = "Mencari langkah praktik dengan AI...";
-  });
-  try {
-    const results = await fetchStepsBatch(entries.map(({ itemDiv }) => itemDiv.dataset.cleanText));
-    entries.forEach(({ itemDiv }, i) => {
-      const steps = results[i] || [];
+    part2Entries.forEach(({ itemDiv, rawText }, i) => {
+      const r = (results.part2 || [])[i] || { soal: rawText, perintah_terdeteksi: [], steps: [] };
+      applyClassifyResult(itemDiv, rawText, r);
+      const steps = r.steps || [];
       itemDiv.querySelector(".steps-area").value = steps.join("\n");
       itemDiv.querySelector(".steps-status").textContent = steps.length
         ? "Diisi otomatis oleh AI -- wajib diverifikasi & ditulis ulang."
         : "AI tidak menemukan langkah yang relevan -- cari secara manual.";
     });
   } catch (err) {
-    entries.forEach(({ itemDiv }) => showStepsError(itemDiv, err));
-  }
-}
-
-// Gemini's free tier allows only a handful of requests/minute (and a low
-// daily cap). Classifying every item, then looking up quotes/steps for every
-// item, used to fire one request per item per stage -- on a soal with many
-// items that alone could burn through the quota before the student sees
-// anything. Each stage is now one batched request for all items instead, and
-// quotes/steps only run after classification finishes since they must look
-// up the cleaned (post prompt-injection-check) text, not the raw soal text.
-async function runAutoFill(entries) {
-  if (!entries.length) return;
-  entries.forEach(({ itemDiv }) => {
-    itemDiv.querySelector(".classify-status").textContent =
-      "Memeriksa soal dengan AI (deteksi prompt injection)...";
-  });
-  try {
-    const results = await fetchClassifyBatch(entries.map(({ rawText }) => rawText));
-    entries.forEach(({ itemDiv, rawText }, i) => {
-      applyClassifyResult(itemDiv, rawText, results[i] || { soal: rawText, perintah_terdeteksi: [] });
+    entries.forEach(({ itemDiv, rawText }) => {
+      showClassifyError(itemDiv, rawText, err);
+      if (itemDiv.dataset.needsQuotes) showQuotesError(itemDiv, err);
+      if (itemDiv.dataset.needsSteps) showStepsError(itemDiv, err);
     });
-  } catch (err) {
-    entries.forEach(({ itemDiv, rawText }) => showClassifyError(itemDiv, rawText, err));
   }
-
-  const quoteEntries = entries.filter(({ itemDiv }) => itemDiv.dataset.needsQuotes);
-  const stepEntries = entries.filter(({ itemDiv }) => itemDiv.dataset.needsSteps);
-  await Promise.all([runQuotesAutoFill(quoteEntries), runStepsAutoFill(stepEntries)]);
 }
 
 function renderParsed(data) {
