@@ -385,7 +385,7 @@ function renderParsed(data) {
 el("parse_btn").addEventListener("click", async () => {
   const fileInput = el("soal_file");
   if (!fileInput.files.length) {
-    el("parse_status").textContent = "Pilih file soal .docx terlebih dahulu.";
+    el("parse_status").textContent = "Pilih file soal (.docx atau .pdf) terlebih dahulu.";
     return;
   }
   const templateInput = el("template_file");

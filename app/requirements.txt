@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 python-docx
+pdfplumber
 google-genai
 python-multipart
 python-dotenv
