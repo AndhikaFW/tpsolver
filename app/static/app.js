@@ -355,6 +355,7 @@ function renderParsed(data) {
   const part1Container = el("part1_items");
   part1Container.innerHTML = "";
   if (part1 && part1.items.length) {
+    el("part1_title").textContent = part1.title || "Teori";
     part1.items.forEach((item) => {
       part1Container.appendChild(
         buildItem("1", item, { showSteps: false, showScreenshot: false, showQuotes: true })
@@ -367,6 +368,7 @@ function renderParsed(data) {
   const part2Container = el("part2_items");
   part2Container.innerHTML = "";
   if (part2 && part2.items.length) {
+    el("part2_title").textContent = part2.title || "Praktek";
     part2.items.forEach((item) => {
       part2Container.appendChild(buildItem("2", item, { showSteps: true, showScreenshot: true }));
     });
@@ -409,7 +411,10 @@ el("parse_btn").addEventListener("click", async () => {
 });
 
 function collectPartsAnswers() {
-  const result = { "1": [], "2": [] };
+  const result = {
+    "1": { title: (parsedSoal.parts["1"] || {}).title || "", items: [] },
+    "2": { title: (parsedSoal.parts["2"] || {}).title || "", items: [] },
+  };
   document.querySelectorAll(".item").forEach((itemDiv) => {
     const part = itemDiv.dataset.part;
     const number = parseInt(itemDiv.dataset.number, 10);
@@ -417,7 +422,7 @@ function collectPartsAnswers() {
     const references = Array.from(
       itemDiv.querySelectorAll(".sources-list input[type=checkbox]:checked")
     ).map((cb) => cb.dataset.source);
-    result[part].push({ number, answer, references });
+    result[part].items.push({ number, answer, references });
   });
   return result;
 }

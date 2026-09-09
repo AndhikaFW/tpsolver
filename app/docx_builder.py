@@ -156,7 +156,10 @@ def build_output(
 ) -> bytes:
     """Assemble the final .docx.
 
-    parts_answers: {"1": [{"number": 1, "answer": str, "references": [str, ...]}, ...], ...}
+    parts_answers: {
+      "1": {"title": str, "items": [{"number": 1, "answer": str, "references": [str, ...]}, ...]},
+      "2": {...},
+    }
     images_by_item: {"2-1": [bytes, ...], ...} keyed "{part}-{number}" for Part 2 screenshots.
     """
     doc = Document(io.BytesIO(template_bytes))
@@ -177,10 +180,12 @@ def build_output(
     ref_bullet_tmpl = templates["ref_bullet"]
 
     for part_number in ("1", "2"):
-        items = parts_answers.get(part_number) or []
+        part = parts_answers.get(part_number) or {}
+        items = part.get("items") or []
         if not items:
             continue
-        _add_heading(doc, ref_label_tmpl, f"Part {part_number} - {PART_TITLES[part_number]}")
+        title = part.get("title") or PART_TITLES.get(part_number, "")
+        _add_heading(doc, ref_label_tmpl, f"Part {part_number} - {title}")
 
         for item in items:
             number = item["number"]

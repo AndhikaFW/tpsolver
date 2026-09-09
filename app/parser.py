@@ -16,7 +16,6 @@ from typing import Any
 import pdfplumber
 from docx import Document
 
-_HEADING_RE = re.compile(r"^Part\s+(\d+)\s*-\s*(.+?)\s*$", re.IGNORECASE)
 _ITEM_RE = re.compile(r"(?<!\S)(\d+)\.\s+")
 
 # Matched by title content (normalized, punctuation/case/spacing-insensitive)
@@ -25,6 +24,38 @@ _ITEM_RE = re.compile(r"(?<!\S)(\d+)\.\s+")
 _IGNORED_TITLES = {"precs"}
 
 _BULLET_RE = re.compile(r"^[•●*\-]\s+")
+
+# Different modules' soal use different section-heading conventions -- e.g.
+# "Part 1 - Teori" in one module, "I. SOAL" / "II. INSTALASI TOOLS" in
+# another. Both are tried; whichever matches determines the part number.
+_HEADING_RE = re.compile(r"^Part\s+(\d+)\s*-\s*(.+?)\s*$", re.IGNORECASE)
+_ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
+_ROMAN_HEADING_RE = re.compile(r"^([IVXLC]+)\.\s*(.+?)\s*$")
+
+
+def _roman_to_int(roman: str) -> int:
+    total = 0
+    prev = 0
+    for ch in reversed(roman):
+        value = _ROMAN_VALUES[ch]
+        total += -value if value < prev else value
+        prev = max(prev, value)
+    return total
+
+
+def _match_heading(text: str) -> tuple[str, str] | None:
+    """Returns (part_number, title) if `text` is a section heading, or None.
+
+    Tries the "Part N - Title" convention first, then falls back to a
+    standalone Roman-numeral convention ("I. Title", "II. Title", ...).
+    """
+    m = _HEADING_RE.match(text)
+    if m:
+        return m.group(1), m.group(2)
+    m = _ROMAN_HEADING_RE.match(text)
+    if m and m.group(2):
+        return str(_roman_to_int(m.group(1))), m.group(2)
+    return None
 
 
 def _normalize_title(title: str) -> str:
@@ -91,10 +122,10 @@ def _reflow_pdf_lines(lines: list[str]) -> list[str]:
         starts_new = (
             not paragraphs
             or not paragraphs[-1]
-            or _HEADING_RE.match(text)
+            or _match_heading(text)
             or _ITEM_RE.match(text)
             or _BULLET_RE.match(text)
-            or _HEADING_RE.match(paragraphs[-1])  # never continue onto/after a heading line
+            or _match_heading(paragraphs[-1])  # never continue onto/after a heading line
         )
         if starts_new:
             paragraphs.append(text)
@@ -151,14 +182,15 @@ def parse_soal(file_bytes: bytes) -> dict[str, Any]:
         text = raw_text.strip()
         if not text:
             continue
-        heading = _HEADING_RE.match(text)
+        heading = _match_heading(text)
         if heading:
-            if _normalize_title(heading.group(2)) in _IGNORED_TITLES:
+            number, title = heading
+            if _normalize_title(title) in _IGNORED_TITLES:
                 current = None
                 in_ignored_section = True
                 continue
             in_ignored_section = False
-            current = (heading.group(1), heading.group(2), [])
+            current = (number, title, [])
             sections.append(current)
             continue
         if in_ignored_section:
