@@ -27,8 +27,11 @@ _BULLET_RE = re.compile(r"^[•●*\-]\s+")
 
 # Different modules' soal use different section-heading conventions -- e.g.
 # "Part 1 - Teori" in one module, "I. SOAL" / "II. INSTALASI TOOLS" in
-# another. Both are tried; whichever matches determines the part number.
-_HEADING_RE = re.compile(r"^Part\s+(\d+)\s*-\s*(.+?)\s*$", re.IGNORECASE)
+# another, "Bagian I; Teori" in yet another. All are tried; whichever matches
+# determines the part number.
+_HEADING_RE = re.compile(
+    r"^(?:Part|Bagian)\s+(\d+|[IVXLC]+)\s*[-–—;:.]\s*(.+?)\s*$", re.IGNORECASE
+)
 _ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100}
 _ROMAN_HEADING_RE = re.compile(r"^([IVXLC]+)\.\s*(.+?)\s*$")
 
@@ -46,12 +49,16 @@ def _roman_to_int(roman: str) -> int:
 def _match_heading(text: str) -> tuple[str, str] | None:
     """Returns (part_number, title) if `text` is a section heading, or None.
 
-    Tries the "Part N - Title" convention first, then falls back to a
+    Tries the "Part N - Title" / "Bagian N; Title" convention first (N may be
+    Arabic or Roman), then falls back to a
     standalone Roman-numeral convention ("I. Title", "II. Title", ...).
     """
     m = _HEADING_RE.match(text)
     if m:
-        return m.group(1), m.group(2)
+        number = m.group(1)
+        if not number.isdigit():
+            number = str(_roman_to_int(number.upper()))
+        return number, m.group(2)
     m = _ROMAN_HEADING_RE.match(text)
     if m and m.group(2):
         return str(_roman_to_int(m.group(1))), m.group(2)
@@ -143,7 +150,13 @@ def _pdf_paragraphs(file_bytes: bytes) -> list[str]:
     lines: list[str] = []
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
         for page in pdf.pages:
-            lines.extend((page.extract_text() or "").split("\n"))
+            # A line that is only digits is the page-number footer; left in,
+            # it would get reflowed onto the end of the page's last question.
+            lines.extend(
+                line
+                for line in (page.extract_text() or "").split("\n")
+                if not line.strip().isdigit()
+            )
     paragraphs = _reflow_pdf_lines(lines)
     if not any(p.strip() for p in paragraphs):
         raise ValueError(
